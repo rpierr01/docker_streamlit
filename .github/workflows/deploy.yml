@@ -31,7 +31,6 @@ jobs:
           curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
             -o /usr/local/bin/cloudflared
           chmod +x /usr/local/bin/cloudflared
-          cloudflared --version
 
       - name: Setup SSH key
         run: |
@@ -40,14 +39,14 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
 
       - name: Deploy via SSH over Cloudflare Tunnel
-        env:
-          CF_HOST: ${{ secrets.CF_TUNNEL_HOST }}
-          DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          SSH_USER: ${{ secrets.SSH_USER }}
         run: |
+          CF_HOST="${{ secrets.CF_TUNNEL_HOST }}"
+          SSH_USER="${{ secrets.SSH_USER }}"
+          DOCKER_USER="${{ secrets.DOCKERHUB_USERNAME }}"
+
           ssh -o StrictHostKeyChecking=no \
               -o UserKnownHostsFile=/dev/null \
-              -o ProxyCommand="cloudflared access ssh --hostname %h" \
+              -o ProxyCommand="cloudflared access ssh --hostname ${CF_HOST}" \
               -i ~/.ssh/id_ed25519 \
               ${SSH_USER}@${CF_HOST} \
               "docker pull ${DOCKER_USER}/mon-dashboard:latest && \
