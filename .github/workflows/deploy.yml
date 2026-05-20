@@ -1,0 +1,64 @@
+name: Build & Deploy Dashboard
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/mon-dashboard:latest
+
+      # Installe cloudflared sur le runner GitHub
+      - name: Install cloudflared
+        run: |
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            -o /usr/local/bin/cloudflared
+          chmod +x /usr/local/bin/cloudflared
+
+      # Configure la clé SSH
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          # Désactive la vérification stricte du host (tunnel éphémère)
+          cat >> ~/.ssh/config << 'SSHEOF'
+          Host cloudflare-tunnel
+            HostName ${{ secrets.CF_TUNNEL_HOST }}
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/id_ed25519
+            StrictHostKeyChecking no
+            ProxyCommand cloudflared access ssh --hostname %h
+          SSHEOF
+
+      # SSH → pull + restart du conteneur
+      - name: Deploy via SSH over Cloudflare Tunnel
+        run: |
+          ssh cloudflare-tunnel "
+            docker pull ${{ secrets.DOCKERHUB_USERNAME }}/mon-dashboard:latest &&
+            docker stop dashboard || true &&
+            docker rm dashboard || true &&
+            docker run -d \
+              --name dashboard \
+              --restart unless-stopped \
+              -p 8501:8501 \
+              ${{ secrets.DOCKERHUB_USERNAME }}/mon-dashboard:latest
+          "
